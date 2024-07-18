@@ -23,7 +23,7 @@ import { Queue } from "@utils/Queue";
 import { useForceUpdater } from "@utils/react";
 import definePlugin from "@utils/types";
 import { findByPropsLazy, findComponentByCodeLazy } from "@webpack";
-import { ChannelStore, FluxDispatcher, React, RestAPI, Tooltip } from "@webpack/common";
+import { ChannelStore, Constants, FluxDispatcher, React, RestAPI, Tooltip } from "@webpack/common";
 import { CustomEmoji } from "@webpack/types";
 import { Message, ReactionEmoji, User } from "discord-types/general";
 
@@ -36,21 +36,30 @@ let reactions: Record<string, ReactionCacheEntry>;
 function fetchReactions(msg: Message, emoji: ReactionEmoji, type: number) {
     const key = emoji.name + (emoji.id ? `:${emoji.id}` : "");
     return RestAPI.get({
-        url: `/channels/${msg.channel_id}/messages/${msg.id}/reactions/${key}`,
+        url: Constants.Endpoints.REACTIONS(msg.channel_id, msg.id, key),
         query: {
             limit: 100,
             type
         },
         oldFormErrors: true
     })
-        .then(res => FluxDispatcher.dispatch({
-            type: "MESSAGE_REACTION_ADD_USERS",
-            channelId: msg.channel_id,
-            messageId: msg.id,
-            users: res.body,
-            emoji,
-            reactionType: type
-        }))
+        .then(res => {
+            for (const user of res.body) {
+                FluxDispatcher.dispatch({
+                    type: "USER_UPDATE",
+                    user
+                });
+            }
+
+            FluxDispatcher.dispatch({
+                type: "MESSAGE_REACTION_ADD_USERS",
+                channelId: msg.channel_id,
+                messageId: msg.id,
+                users: res.body,
+                emoji,
+                reactionType: type
+            });
+        })
         .catch(console.error)
         .finally(() => sleep(250));
 }
@@ -147,13 +156,6 @@ export default definePlugin({
 
         const reactions = getReactionsWithQueue(message, emoji, type);
         const users = Object.values(reactions).filter(Boolean) as User[];
-
-        for (const user of users) {
-            FluxDispatcher.dispatch({
-                type: "USER_UPDATE",
-                user
-            });
-        }
 
         return (
             <div
